@@ -1,9 +1,17 @@
 import json
 import os
+import re
 import sys
 import urllib.parse
 from lxml import etree
 import requests
+from rich.console import Console
+from rich.table import Table
+from datetime import datetime
+
+console = Console()
+
+console.clear()
 
 # Get absolute path of the script
 script_path = os.path.dirname(os.path.realpath(__file__))
@@ -42,7 +50,6 @@ def auth():
     if "SESS" in user_details:
         for sess_k, sess_v in user_details["SESS"].items():
             session.cookies[sess_k] = sess_v
-    # json_file.close()
 
     # Try making a request to the server to see if we are still logged in
     whoami = session.get(f'{user_details["school_url"]}/d2l/api/lp/1.26/users/whoami')
@@ -170,6 +177,7 @@ def get_grades(course_id):
         return False, None
 
 
+
 def get_course_list():
     my_enrollments = session.get(f'{user_details["school_url"]}/d2l/api/lp/1.26/enrollments/myenrollments/')
     # Make sure we got a 200 response
@@ -185,18 +193,63 @@ def get_course_list():
 course_list_status, course_list_json = get_course_list()
 
 if course_list_status:
-    # Loop through the courses from more recent to oldest
-    for course in reversed(course_list_json["Items"]):
-        if course["OrgUnit"]["Type"]["Name"] != "Group":
-            print('------------ Most recent course ------------')
-            print(f'Name: {course["OrgUnit"]["Name"]}')
-            print(f'Course ID: {course["OrgUnit"]["Id"]}')
-            print(f"Started: {course['Access']['StartDate']}\n")
+    # Set up a rich table
+    course_overview_table = Table(show_header=True, header_style='bold', title='Course Overview')
+    course_overview_table.add_column('ID', style='sky_blue3 bold')
+    course_overview_table.add_column('Abbreviation', style='magenta')
+    course_overview_table.add_column('Course Name', style='magenta')
+    course_overview_table.add_column('Start - End', style='green')
 
-            # Get the grades for the course
-            get_grades_status, grades = get_grades(course["OrgUnit"]["Id"])
-            if get_grades_status:
-                print(f'You currently have {len(grades)} grades in this course:')
-                for grade in grades:
-                    print(f'{grade["Name"]} || {grade["DisplayedGrade"]} || ({grade["Points"]}/{grade["Total"]})')
-            break
+    # Loop through the courses from more recent to oldest
+    course_counter = 0
+    course_name_blacklist = ['Student Resource Center', 'Tour for Students', 'New Student Orientation']
+    for course in reversed(course_list_json["Items"]):
+        if course["OrgUnit"]["Type"]["Name"] == "Course Offering" and not any(x in course["OrgUnit"]["Name"] for x in course_name_blacklist):
+            course_counter += 1
+            # Try and get the course abbreviation (e.g. "CPS-101")
+            course_abbr_re = re.search(r"[A-Z]{3,4}-\d{3}", course["OrgUnit"]["Name"])
+            # datetime the start and end dates
+            start_date = datetime.strptime(course["Access"]["StartDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
+            end_date = datetime.strptime(course["Access"]["EndDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
+
+            # Add the course to the table
+            course_overview_table.add_row(
+                str(course_counter),
+                course_abbr_re.group() if course_abbr_re else course["OrgUnit"]["Name"],
+                str(course["OrgUnit"]["Name"]).split(' - ')[-1],
+                f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}'
+            )
+
+
+
+            # # Get the grades for the course
+            # get_grades_status, grades = get_grades(course["OrgUnit"]["Id"])
+            # if get_grades_status:
+            #     print(f'You currently have {len(grades)} grades in this course:')
+            #     for grade in grades:
+            #         print(f'{grade["Name"]} || {grade["DisplayedGrade"]} || ({grade["Points"]}/{grade["Total"]})')
+            # break
+
+    console.print(course_overview_table)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
