@@ -6,6 +6,7 @@ import urllib.parse
 from lxml import etree
 import requests
 from rich.console import Console
+from rich.prompt import Prompt
 from rich.table import Table
 from datetime import datetime
 
@@ -42,10 +43,6 @@ session = requests.Session()
 
 
 def auth():
-    # Load the session data from the JSON file
-    # json_file = open(script_path + '/d2l-bot-auth.json', 'r')
-    # json_data = json.load(json_file)
-
 
     if "SESS" in user_details:
         for sess_k, sess_v in user_details["SESS"].items():
@@ -69,14 +66,11 @@ def auth():
         # If we are not logged in, log in
         initial_request = session.get(user_details["school_url"])
 
-        # verify the cookie JSESSIONID is in the response
-        if 'JSESSIONID' not in session.cookies:
-            return False, 'JSESSIONID not in session.cookies', auth_method
 
         if initial_request.history:
             print("Request was redirected to: " + initial_request.url)
-
             login_page = session.get(initial_request.url)
+
             tree = etree.HTML(login_page.text)
 
             try:
@@ -98,8 +92,7 @@ def auth():
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'same-origin',
                 'Sec-Fetch-User': '?1',
-                'TE': 'trailers',
-                'Cookie': f'JSESSIONID={session.cookies["JSESSIONID"]}'
+                'TE': 'trailers'
             }
 
             payload = f'username={user_details["username"]}&password={urllib.parse.quote(user_details["password"])}&execution={le}&_eventId=submit'
@@ -113,7 +106,6 @@ def auth():
             except:
                 return False, 'SAMLResponse not found in login page', auth_method
 
-            # print(f'SAMLResponse: {urllib.parse.quote(SAMLResponse)}')
 
             # Now, POST to the login page
             headers = {
@@ -202,6 +194,8 @@ if course_list_status:
 
     # Loop through the courses from more recent to oldest
     course_counter = 0
+    # This dict will be used to store counter as a key and the course ID as the value
+    temp_selection_store = {}
     course_name_blacklist = ['Student Resource Center', 'Tour for Students', 'New Student Orientation']
     for course in reversed(course_list_json["Items"]):
         if course["OrgUnit"]["Type"]["Name"] == "Course Offering" and not any(x in course["OrgUnit"]["Name"] for x in course_name_blacklist):
@@ -220,6 +214,19 @@ if course_list_status:
                 f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}'
             )
 
+            # Add the course to the temp_selection_store
+            temp_selection_store[str(course_counter)] = course["OrgUnit"]["Id"]
+
+    # Print the table
+    console.print(course_overview_table)
+
+    # Ask the user to select a course
+    course_selection = Prompt.ask('Please select a course to view grades for: ', choices=[*temp_selection_store], default='1')
+
+    console.print(f"You selected {temp_selection_store[course_selection]}")
+
+
+
 
 
             # # Get the grades for the course
@@ -230,7 +237,6 @@ if course_list_status:
             #         print(f'{grade["Name"]} || {grade["DisplayedGrade"]} || ({grade["Points"]}/{grade["Total"]})')
             # break
 
-    console.print(course_overview_table)
 
 
 
