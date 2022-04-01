@@ -37,13 +37,11 @@ else:
 
 user_details = json.load(open(script_path + '/d2l-bot-auth.json'))
 
-f = user_details["school_url"]
 
 session = requests.Session()
 
 
 def auth():
-
     if "SESS" in user_details:
         for sess_k, sess_v in user_details["SESS"].items():
             session.cookies[sess_k] = sess_v
@@ -163,99 +161,108 @@ def get_grades(course_id):
                 }
                 parsed_grades.append(parsed_grade_obj)
 
-        return True, parsed_grades
+        return parsed_grades
     except requests.exceptions.HTTPError as e:
         print(f'Unable to get course list: {e}')
-        return False, None
+        return False
 
 
-
-def get_course_list():
+def show_all_courses():
     my_enrollments = session.get(f'{user_details["school_url"]}/d2l/api/lp/1.26/enrollments/myenrollments/')
     # Make sure we got a 200 response
     try:
         my_enrollments.raise_for_status()
-        return True, my_enrollments.json()
+        my_enrollments_json = my_enrollments.json()
+
+        # Set up a rich table
+        course_overview_table = Table(show_header=True, header_style='bold', title='Course Overview')
+        course_overview_table.add_column('ID', style='sky_blue3 bold')
+        course_overview_table.add_column('Abbreviation', style='magenta')
+        course_overview_table.add_column('Course Name', style='magenta')
+        course_overview_table.add_column('Start - End', style='green')
+
+        # Loop through the courses from more recent to oldest
+        course_counter = 0
+        # This dict will be used to store counter as a key and the course ID as the value
+        temp_selection_store = {}
+        course_name_blacklist = ['Student Resource Center', 'Tour for Students', 'New Student Orientation']
+        for course in reversed(my_enrollments_json["Items"]):
+            if course["OrgUnit"]["Type"]["Name"] == "Course Offering" and not any(x in course["OrgUnit"]["Name"] for x in course_name_blacklist):
+                course_counter += 1
+                # Try and get the course abbreviation (e.g. "CPS-101")
+                course_abbr_re = re.search(r"[A-Z]{3,4}-\d{3}", course["OrgUnit"]["Name"])
+                # datetime the start and end dates
+                start_date = datetime.strptime(course["Access"]["StartDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
+                end_date = datetime.strptime(course["Access"]["EndDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
+
+                # Add the course to the table
+                course_overview_table.add_row(
+                    str(course_counter),
+                    course_abbr_re.group() if course_abbr_re else course["OrgUnit"]["Name"],
+                    str(course["OrgUnit"]["Name"]).split(' - ')[-1],
+                    f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}'
+                )
+
+                # Add the course to the temp_selection_store
+                temp_selection_store[str(course_counter)] = course["OrgUnit"]["Id"]
+
+        # Print the table
+        console.print(course_overview_table)
+
+        # Ask the user to select a course
+        prompt_for_course = Prompt.ask('Please select a course to view grades for: ', choices=[*temp_selection_store], default='1')
+
+        console.print(f"Selected course ID: {temp_selection_store[prompt_for_course]}")
+        return temp_selection_store[prompt_for_course]
+
     except requests.exceptions.HTTPError as e:
         print(f'Unable to get course list: {e}')
-        return False, None
-
-
-# Get the latest course assuming its type/name is not "Group"
-course_list_status, course_list_json = get_course_list()
-
-if course_list_status:
-    # Set up a rich table
-    course_overview_table = Table(show_header=True, header_style='bold', title='Course Overview')
-    course_overview_table.add_column('ID', style='sky_blue3 bold')
-    course_overview_table.add_column('Abbreviation', style='magenta')
-    course_overview_table.add_column('Course Name', style='magenta')
-    course_overview_table.add_column('Start - End', style='green')
-
-    # Loop through the courses from more recent to oldest
-    course_counter = 0
-    # This dict will be used to store counter as a key and the course ID as the value
-    temp_selection_store = {}
-    course_name_blacklist = ['Student Resource Center', 'Tour for Students', 'New Student Orientation']
-    for course in reversed(course_list_json["Items"]):
-        if course["OrgUnit"]["Type"]["Name"] == "Course Offering" and not any(x in course["OrgUnit"]["Name"] for x in course_name_blacklist):
-            course_counter += 1
-            # Try and get the course abbreviation (e.g. "CPS-101")
-            course_abbr_re = re.search(r"[A-Z]{3,4}-\d{3}", course["OrgUnit"]["Name"])
-            # datetime the start and end dates
-            start_date = datetime.strptime(course["Access"]["StartDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
-            end_date = datetime.strptime(course["Access"]["EndDate"], '%Y-%m-%dT%H:%M:%S.%fZ')
-
-            # Add the course to the table
-            course_overview_table.add_row(
-                str(course_counter),
-                course_abbr_re.group() if course_abbr_re else course["OrgUnit"]["Name"],
-                str(course["OrgUnit"]["Name"]).split(' - ')[-1],
-                f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}'
-            )
-
-            # Add the course to the temp_selection_store
-            temp_selection_store[str(course_counter)] = course["OrgUnit"]["Id"]
-
-    # Print the table
-    console.print(course_overview_table)
-
-    # Ask the user to select a course
-    course_selection = Prompt.ask('Please select a course to view grades for: ', choices=[*temp_selection_store], default='1')
-
-    console.print(f"You selected {temp_selection_store[course_selection]}")
+        return None
 
 
 
+while True:
+    console.clear()
 
+    # Start by displaying all the courses
+    selected_course_id = show_all_courses()
 
-            # # Get the grades for the course
-            # get_grades_status, grades = get_grades(course["OrgUnit"]["Id"])
-            # if get_grades_status:
-            #     print(f'You currently have {len(grades)} grades in this course:')
-            #     for grade in grades:
-            #         print(f'{grade["Name"]} || {grade["DisplayedGrade"]} || ({grade["Points"]}/{grade["Total"]})')
-            # break
+    change_course = False
 
+    while not change_course:
+        # Now prompt the user for what they want to do next
+        course_options = {'1': 'View Grades', '2': 'View upcoming assignments', '3': 'See all available courses', '0': 'Exit'}
+        console.print(f'\nWhat would you like to do next?', style='yellow3')
+        for option in course_options:
+            console.print(f'{option}. [sky_blue2 bold]{course_options[option]}[/sky_blue2 bold]')
 
+        # Prompt for the user's selection
+        course_selection = Prompt.ask('Please select an option: ', choices=[*course_options], default='2')
 
+        console.line()
 
+        match course_selection:
+            # So the reason why the case value is a string and not an int is because Rich Prompt doesn't support ints as choices and the way we pass in the options prevents us from casting to a string in the prompt
+            case '1':
+                grades = get_grades(course_id=selected_course_id)
+                if grades:
+                    print(f'You currently have {len(grades)} grades in this course:')
+                    for grade in grades:
+                        print(f'{grade["Name"]} || {grade["DisplayedGrade"]} || ({grade["Points"]}/{grade["Total"]})')
+                else:
+                    print('No grades found')
 
+            case '2':
+                print(f'Getting upcoming assignments for course {selected_course_id}')
 
+            case '3':
+                change_course = True
+                continue
 
+            case '0':
+                console.print('Exiting...', style='bold red')
+                exit()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        # Press enter to continue with Rich Prompt
+        console.print('\nPress enter to continue...', style='dodger_blue1')
+        console.input()
