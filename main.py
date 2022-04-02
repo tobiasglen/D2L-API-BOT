@@ -8,7 +8,7 @@ import requests
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
-from datetime import datetime
+from datetime import datetime, timedelta
 
 console = Console()
 
@@ -220,6 +220,51 @@ def show_all_courses():
         return None
 
 
+def get_upcoming_assignments(course_id, days_ahead=14):
+    course_calendar = session.get(f'{user_details["school_url"]}/d2l/api/le/1.41/{course_id}/calendar/events/')
+    # Make sure we got a 200 response
+    try:
+        course_calendar.raise_for_status()
+        course_calendar_json = course_calendar.json()
+
+
+        # Set up a rich table
+        upcoming_assignments_table = Table(show_header=True, header_style='bold', title='Upcoming Assignments', show_lines=True)
+        upcoming_assignments_table.add_column('Title', style='magenta')
+        upcoming_assignments_table.add_column('Description', style='magenta')
+        upcoming_assignments_table.add_column('Link', style='green')
+        upcoming_assignments_table.add_column('Due Date', style='green')
+
+
+        # loop through the events and find the ones that are within the days_ahead range
+        upcoming_assignments = []
+        for event in course_calendar_json:
+            if event["StartDateTime"] and event["EndDateTime"]:
+                start_date = datetime.strptime(event["StartDateTime"], '%Y-%m-%dT%H:%M:%S.%fZ')
+                end_date = datetime.strptime(event["EndDateTime"], '%Y-%m-%dT%H:%M:%S.%fZ')
+                if datetime.today().date() <= start_date.date() <= (datetime.today() + timedelta(days=days_ahead)).date():
+                    upcoming_assignments.append(event)
+                    print(f'{event["Title"]} - {start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}')
+                    upcoming_assignments_table.add_row(
+                        event["Title"],
+                        # Replace multiple newlines with a single newline and multiple spaces with a single space
+                        re.sub(r'\n+', '\n', re.sub(r'\s+', ' ', event["Description"])),
+                        event["CalendarEventViewUrl"],
+                        end_date.strftime("%b %d")
+                    )
+
+        # Display the table
+        console.print(upcoming_assignments_table)
+
+
+
+
+
+    except requests.exceptions.HTTPError as e:
+        print(f'Unable to get course calendar: {e}')
+        return False
+
+
 
 while True:
     console.clear()
@@ -232,6 +277,7 @@ while True:
     while not change_course:
         # Now prompt the user for what they want to do next
         course_options = {'1': 'View Grades', '2': 'View upcoming assignments', '3': 'See all available courses', '0': 'Exit'}
+        console.clear()
         console.print(f'\nWhat would you like to do next?', style='yellow3')
         for option in course_options:
             console.print(f'{option}. [sky_blue2 bold]{course_options[option]}[/sky_blue2 bold]')
@@ -254,6 +300,7 @@ while True:
 
             case '2':
                 print(f'Getting upcoming assignments for course {selected_course_id}')
+                get_upcoming_assignments(course_id=selected_course_id)
 
             case '3':
                 change_course = True
