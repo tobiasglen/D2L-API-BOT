@@ -227,38 +227,48 @@ def get_upcoming_assignments(course_id, days_ahead=14):
         course_calendar.raise_for_status()
         course_calendar_json = course_calendar.json()
 
-
         # Set up a rich table
         upcoming_assignments_table = Table(show_header=True, header_style='bold', title='Upcoming Assignments', show_lines=True)
         upcoming_assignments_table.add_column('Title', style='magenta')
         upcoming_assignments_table.add_column('Description', style='magenta')
         upcoming_assignments_table.add_column('Link', style='green')
         upcoming_assignments_table.add_column('Due Date', style='green')
+        upcoming_assignments_table.add_column('Status', style='green')
 
 
         # loop through the events and find the ones that are within the days_ahead range
-        upcoming_assignments = []
         for event in course_calendar_json:
             if event["StartDateTime"] and event["EndDateTime"]:
-                start_date = datetime.strptime(event["StartDateTime"], '%Y-%m-%dT%H:%M:%S.%fZ')
-                end_date = datetime.strptime(event["EndDateTime"], '%Y-%m-%dT%H:%M:%S.%fZ')
+                start_date = datetime.fromisoformat(event["StartDateTime"][:-1])
+                end_date = datetime.fromisoformat(event["EndDateTime"][:-1])
                 if datetime.today().date() <= start_date.date() <= (datetime.today() + timedelta(days=days_ahead)).date():
-                    upcoming_assignments.append(event)
-                    print(f'{event["Title"]} - {start_date.strftime("%b %d")} - {end_date.strftime("%b %d %Y")}')
+
+                    # Here it might've make sense to use asyncio to get "submitted" status for each assignment but since there's only typically 2-3 assignments per week, it's not worth it
+                    assignment_submitted = False
+                    if event["IsAssociatedWithEntity"]:
+                        # Get the associated entity ID
+                        entity_id = event["AssociatedEntity"]["AssociatedEntityId"]
+                        # Make a request to get the submission status
+                        submission_status = session.get(f'{user_details["school_url"]}/d2l/api/le/1.41/{course_id}/dropbox/folders/{entity_id}/submissions/?activeOnly=true')
+                        try:
+                            submission_status.raise_for_status()
+                            submission_status_json = submission_status.json()
+                            # The response is either a list of entity info & submissions or just an empty list
+                            if submission_status_json:
+                                assignment_submitted = True
+                        except requests.exceptions.HTTPError as e:
+                            print(f'Unable to get submission status: {e}')
+
+
                     upcoming_assignments_table.add_row(
                         event["Title"],
-                        # Replace multiple newlines with a single newline and multiple spaces with a single space
                         re.sub(r'\n+', '\n', re.sub(r'\s+', ' ', event["Description"])),
                         event["CalendarEventViewUrl"],
-                        end_date.strftime("%b %d")
+                        end_date.strftime("%b %d"),
+                        '[yellow3]Submitted[/yellow3]' if assignment_submitted else '[red]Not Submitted[/red]'
                     )
-
         # Display the table
         console.print(upcoming_assignments_table)
-
-
-
-
 
     except requests.exceptions.HTTPError as e:
         print(f'Unable to get course calendar: {e}')
@@ -299,7 +309,6 @@ while True:
                     print('No grades found')
 
             case '2':
-                print(f'Getting upcoming assignments for course {selected_course_id}')
                 get_upcoming_assignments(course_id=selected_course_id)
 
             case '3':
